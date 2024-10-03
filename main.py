@@ -1,6 +1,7 @@
 import sqlite3
 import os
 import json
+import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -12,11 +13,13 @@ def init_db():
     """Инициализация базы данных"""
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
-        # Таблица с колонкой для JSON с ответами
+        # Таблица с колонками для JSON-ответов и времени заполнения
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS responses (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                answers TEXT
+                chat_id INTEGER,
+                answers TEXT,
+                timestamp TEXT
             )
         ''')
         conn.commit()
@@ -41,8 +44,35 @@ user_data = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Стартовая команда /start, начинающая анкету"""
-    user_data[update.message.chat_id] = {"step": 0, "responses": {}}
+    chat_id = update.message.chat_id
+
+    # Проверяем, заполнял ли пользователь анкету за последние 24 часа
+    if not can_fill_survey(chat_id):
+        await update.message.reply_text("Вы уже заполнили анкету сегодня. Пожалуйста, попробуйте снова завтра.")
+        return
+
+    user_data[chat_id] = {"step": 0, "responses": {}}
     await ask_question(update, context)
+
+
+def can_fill_survey(chat_id):
+    """Проверка, может ли пользователь заполнить анкету (раз в день)"""
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT timestamp FROM responses WHERE chat_id = ? ORDER BY timestamp DESC LIMIT 1
+        ''', (chat_id,))
+        result = cursor.fetchone()
+
+        if result:
+            last_filled = datetime.datetime.fromisoformat(result[0])
+            now = datetime.datetime.now()
+
+            # Проверяем, прошло ли 24 часа
+            if (now - last_filled).total_seconds() < 24 * 3600:
+                return False
+
+    return True
 
 
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -83,24 +113,25 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Преобразование словаря с ответами в JSON-строку
     json_responses = json.dumps(responses, ensure_ascii=False)
+    timestamp = datetime.datetime.now().isoformat()
 
-    # Сохранение JSON в SQLite
+    # Сохранение JSON и времени в SQLite
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            INSERT INTO responses (answers)
-            VALUES (?)
-        ''', (json_responses,))
+            INSERT INTO responses (chat_id, answers, timestamp)
+            VALUES (?, ?, ?)
+        ''', (chat_id, json_responses, timestamp))
         conn.commit()
 
     # Отправляем сообщение пользователю
-    await update.message.reply_text("Спасибо за заполнение анкеты!")
+    await update.message.reply_text("Спасибо за заполнение анкеты! Вы можете заполнить её снова через 24 часа.")
     del user_data[chat_id]  # Очищаем данные после завершения
 
 
 def main():
     """Запуск Telegram-бота"""
-    application = Application.builder().token('').build()
+    application = Application.builder().token('7034463952:AAF20wTujVISRpUO0m4rAvsDBbF2TVwQj9Q').build()
 
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
@@ -114,3 +145,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
