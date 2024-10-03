@@ -1,6 +1,6 @@
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from admin import admin_login, handle_admin_credentials
-from survey import start, button_handler, download_surveys, handle_response
+from survey import start, button_handler, download_surveys, handle_response,add_survey
 import json
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -24,6 +24,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if user_state.get(chat_id) == 'admin_login':
         # Если пользователь вводит логин и пароль
         await handle_admin_credentials(update, context)
+
     else:
         # Иначе считаем, что это ответы на анкету
         await handle_response(update, context)
@@ -60,7 +61,6 @@ def main():
 
     # Обработка ответов на анкеты
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-  #  application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_response))
 
     # Запуск бота
     application.run_polling()

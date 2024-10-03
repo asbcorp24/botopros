@@ -79,8 +79,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     query = update.callback_query
     await query.answer()
     print( query.data )
-
-    if query.data == 'admin':
+    if query.data == 'add_survey':
+        await add_survey(update, context)
+    elif query.data == 'admin':
         # Запрашиваем логин и пароль администратора
         await admin_login(update, context)
 
@@ -226,3 +227,61 @@ def get_remaining_time(chat_id, survey_name, interval_hours):
                 minutes = remainder // 60
                 return f"{hours} час(ов) и {minutes} минут(ы)"
     return None
+async def add_survey(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Начало процесса добавления новой анкеты"""
+    await update.callback_query.message.reply_text("Введите имя новой анкеты:")
+    context.user_data['adding_survey'] = True  # Флаг начала процесса добавления анкеты
+    context.user_data['new_survey'] = {}  # Храним временные данные новой анкеты
+    context.user_data['new_survey']['form'] = []  # Список вопросов новой анкеты
+async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обработка ввода администратора для добавления новой анкеты"""
+    if context.user_data.get('adding_survey'):
+        if 'survey_name' not in context.user_data['new_survey']:
+            # Сохраняем имя анкеты
+            context.user_data['new_survey']['name'] = update.message.text
+            await update.message.reply_text("Введите первый вопрос для анкеты:")
+            context.user_data['waiting_for_question'] = True
+        elif context.user_data.get('waiting_for_question'):
+            # Добавляем новый вопрос
+            question_text = update.message.text
+            await update.message.reply_text("Введите тип вопроса (text, number, email):")
+            context.user_data['new_question'] = {"name": question_text}  # Сохраняем вопрос временно
+            context.user_data['waiting_for_type'] = True
+            context.user_data.pop('waiting_for_question', None)
+        elif context.user_data.get('waiting_for_type'):
+            # Сохраняем тип вопроса
+            question_type = update.message.text
+            context.user_data['new_question']['type'] = question_type
+            await update.message.reply_text("Введите ограничения (required, optional):")
+            context.user_data['waiting_for_constraints'] = True
+            context.user_data.pop('waiting_for_type', None)
+        elif context.user_data.get('waiting_for_constraints'):
+            # Сохраняем ограничения и добавляем вопрос в список анкеты
+            constraints = update.message.text
+            context.user_data['new_question']['ogr'] = constraints
+            context.user_data['new_survey']['form'].append(context.user_data['new_question'])
+            context.user_data.pop('new_question', None)
+            await update.message.reply_text("Добавить еще один вопрос? (да/нет)")
+            context.user_data['waiting_for_more_questions'] = True
+            context.user_data.pop('waiting_for_constraints', None)
+        elif context.user_data.get('waiting_for_more_questions'):
+            # Обрабатываем добавление дополнительных вопросов
+            if update.message.text.lower() == 'да':
+                await update.message.reply_text("Введите следующий вопрос:")
+                context.user_data['waiting_for_question'] = True
+                context.user_data.pop('waiting_for_more_questions', None)
+            else:
+                # Заканчиваем добавление анкеты и сохраняем её
+                await save_new_survey(context.user_data['new_survey'])
+                await update.message.reply_text(f"Анкета '{context.user_data['new_survey']['name']}' добавлена!")
+                context.user_data.pop('adding_survey', None)
+                context.user_data.pop('new_survey', None)
+
+async def save_new_survey(survey: dict) -> None:
+    """Сохраняет новую анкету в JSON-файл"""
+    with open('survey_schema.json', 'r+', encoding='utf-8') as f:
+        schema = json.load(f)
+        schema['surveys'].append(survey)  # Добавляем новую анкету
+        f.seek(0)  # Возвращаемся в начало файла
+        json.dump(schema, f, ensure_ascii=False, indent=4)  # Сохраняем обновленный JSON
+        f.truncate()  # Удаляем старое содержимое, которое осталось после записи
