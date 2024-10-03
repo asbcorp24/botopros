@@ -29,14 +29,17 @@ def init_db():
 if not os.path.exists(DATABASE):
     init_db()
 
-# JSON-схема для анкеты (пример)
-json_schema = [
-    {"name": "Имя", "type": "text", "ogr": "required"},
-    {"name": "Возраст", "type": "number", "ogr": "min=0"},
-    {"name": "Email", "type": "email", "ogr": "required"},
-    {"name": "Город", "type": "text", "ogr": "optional"},
-    {"name": "Профессия", "type": "text", "ogr": "optional"}
-]
+# JSON-схема для анкеты с интервалом (пример)
+json_schema = {
+    "form": [
+        {"name": "Имя", "type": "text", "ogr": "required"},
+        {"name": "Возраст", "type": "number", "ogr": "min=0"},
+        {"name": "Email", "type": "email", "ogr": "required"},
+        {"name": "Город", "type": "text", "ogr": "optional"},
+        {"name": "Профессия", "type": "text", "ogr": "optional"}
+    ],
+    "interval": 48  # Количество часов между заполнениями анкеты
+}
 
 # Глобальные переменные для хранения состояния анкеты
 user_data = {}
@@ -46,17 +49,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Стартовая команда /start, начинающая анкету"""
     chat_id = update.message.chat_id
 
-    # Проверяем, заполнял ли пользователь анкету за последние 24 часа
-    if not can_fill_survey(chat_id):
-        await update.message.reply_text("Вы уже заполнили анкету сегодня. Пожалуйста, попробуйте снова завтра.")
+    # Проверяем, заполнял ли пользователь анкету в течение времени, указанного в json_schema["interval"]
+    interval_hours = json_schema.get("interval", 24)  # по умолчанию 24 часа, если поле отсутствует
+    if not can_fill_survey(chat_id, interval_hours):
+        await update.message.reply_text(
+            f"Вы уже заполнили анкету. Повторное заполнение возможно через {interval_hours} часов.")
         return
 
     user_data[chat_id] = {"step": 0, "responses": {}}
     await ask_question(update, context)
 
 
-def can_fill_survey(chat_id):
-    """Проверка, может ли пользователь заполнить анкету (раз в день)"""
+def can_fill_survey(chat_id, interval_hours):
+    """Проверка, может ли пользователь заполнить анкету (в зависимости от интервала)"""
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -68,8 +73,8 @@ def can_fill_survey(chat_id):
             last_filled = datetime.datetime.fromisoformat(result[0])
             now = datetime.datetime.now()
 
-            # Проверяем, прошло ли 24 часа
-            if (now - last_filled).total_seconds() < 24 * 3600:
+            # Проверяем, прошло ли указанное количество часов
+            if (now - last_filled).total_seconds() < interval_hours * 3600:
                 return False
 
     return True
@@ -81,8 +86,8 @@ async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user_info = user_data.get(chat_id)
     step = user_info.get("step")
 
-    if step < len(json_schema):
-        question = json_schema[step]["name"]
+    if step < len(json_schema["form"]):
+        question = json_schema["form"][step]["name"]
         await update.message.reply_text(f"Пожалуйста, введите {question}:")
     else:
         # Если все вопросы заданы, сохранить данные
@@ -96,7 +101,7 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     step = user_info.get("step")
 
     # Сохраняем ответ
-    field_name = json_schema[step]["name"]
+    field_name = json_schema["form"][step]["name"]
     user_info["responses"][field_name] = update.message.text
 
     # Переход к следующему вопросу
@@ -125,7 +130,8 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         conn.commit()
 
     # Отправляем сообщение пользователю
-    await update.message.reply_text("Спасибо за заполнение анкеты! Вы можете заполнить её снова через 24 часа.")
+    await update.message.reply_text(
+        "Спасибо за заполнение анкеты! Вы сможете заполнить её снова через указанное время.")
     del user_data[chat_id]  # Очищаем данные после завершения
 
 
@@ -145,4 +151,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
