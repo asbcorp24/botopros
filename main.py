@@ -51,17 +51,19 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Проверяем, заполнял ли пользователь анкету в течение времени, указанного в json_schema["interval"]
     interval_hours = json_schema.get("interval", 24)  # по умолчанию 24 часа, если поле отсутствует
-    if not can_fill_survey(chat_id, interval_hours):
+    remaining_time = get_remaining_time(chat_id, interval_hours)
+
+    if remaining_time:
         await update.message.reply_text(
-            f"Вы уже заполнили анкету. Повторное заполнение возможно через {interval_hours} часов.")
+            f"Вы уже заполнили анкету. Повторное заполнение возможно через {remaining_time}.")
         return
 
     user_data[chat_id] = {"step": 0, "responses": {}}
     await ask_question(update, context)
 
 
-def can_fill_survey(chat_id, interval_hours):
-    """Проверка, может ли пользователь заполнить анкету (в зависимости от интервала)"""
+def get_remaining_time(chat_id, interval_hours):
+    """Проверка оставшегося времени до следующего заполнения анкеты"""
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
         cursor.execute('''
@@ -75,9 +77,11 @@ def can_fill_survey(chat_id, interval_hours):
 
             # Проверяем, прошло ли указанное количество часов
             if (now - last_filled).total_seconds() < interval_hours * 3600:
-                return False
+                remaining_seconds = (interval_hours * 3600) - (now - last_filled).total_seconds()
+                remaining_time = str(datetime.timedelta(seconds=remaining_seconds))
+                return remaining_time
 
-    return True
+    return None
 
 
 async def ask_question(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -131,7 +135,7 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     # Отправляем сообщение пользователю
     await update.message.reply_text(
-        "Спасибо за заполнение анкеты! Вы сможете заполнить её снова через указанное время.")
+        "Спасибо за заполнение анкеты! Вы сможете заполнить её снова через указанный интервал.")
     del user_data[chat_id]  # Очищаем данные после завершения
 
 
