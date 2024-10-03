@@ -100,7 +100,7 @@ async def save_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 def main():
     """Запуск Telegram-бота"""
-    application = Application.builder().token('7034463952:AAF20wTujVISRpUO0m4rAvsDBbF2TVwQj9Q').build()
+    application = Application.builder().token('').build()
 
     # Обработчики команд
     application.add_handler(CommandHandler("start", start))
