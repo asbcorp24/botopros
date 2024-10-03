@@ -1,0 +1,22 @@
+{
+  "surveys": [
+    {
+      "name": "Анкета 1",
+      "form": [
+        {"name": "Имя", "type": "text", "ogr": "required"},
+        {"name": "Возраст", "type": "number", "ogr": "min=0"},
+        {"name": "Email", "type": "email", "ogr": "required"},
+        {"name": "Город", "type": "text", "ogr": "optional"},
+        {"name": "Профессия", "type": "text", "ogr": "optional"}
+      ]
+    },
+    {
+      "name": "Анкета 2",
+      "form": [
+        {"name": "Название проекта", "type": "text", "ogr": "required"},
+        {"name": "Срок выполнения", "type": "date", "ogr": "required"}
+      ]
+    }
+  ],
+  "interval": 48
+}
