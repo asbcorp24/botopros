@@ -43,15 +43,27 @@ def load_json_schema():
 load_json_schema()
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-
     """Стартовая команда /start, открывает меню выбора"""
+
+    # Проверяем, поступило ли событие через команду (message) или через нажатие кнопки (callback_query)
+    if hasattr(update, 'message') and update.message:
+        # Если это команда, используем update.message
+        message = update.message
+    elif hasattr(update, 'callback_query') and update.callback_query:
+        # Если это callback_query (кнопка), используем update.callback_query.message
+        message = update.callback_query.message
+    else:
+        return  # Если нет подходящего объекта, выходим
+
+    # Формируем клавиатуру с кнопками
     keyboard = [
         [InlineKeyboardButton("Администрирование", callback_data='admin')],
         [InlineKeyboardButton("Заполнить анкету", callback_data='fill_survey')]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
+    # Отправляем сообщение с клавиатурой
+    await message.reply_text("Выберите действие:", reply_markup=reply_markup)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработка нажатий кнопок в меню"""
@@ -83,27 +95,72 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await start_survey(update,query.data)
 
 
+import datetime
+
 
 async def show_survey_selection(update: Update) -> None:
+    """Показывает список доступных анкет, которые можно заполнить на текущий момент"""
+    current_time = datetime.datetime.now()
 
-    """Показывает список доступных анкет"""
-    keyboard = [
-        [InlineKeyboardButton(survey['name'], callback_data=f'{survey["name"]}')]
-        for survey in json_schema["surveys"]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.callback_query.message.reply_text("Выберите анкету для заполнения:", reply_markup=reply_markup)
+    keyboard = []
 
+    # Проходим по всем анкетам в json_schema
+    for survey in json_schema["surveys"]:
+        start_time_str = survey.get("start_time", "")
+
+        # Если поле start_time существует и не пусто, проверяем время начала
+        if start_time_str:
+            try:
+                start_time = datetime.datetime.strptime(start_time_str, "%Y-%m-%d %H")
+                if current_time < start_time:
+                    # Если текущее время меньше времени начала, пропускаем эту анкету
+                    continue
+            except ValueError:
+                # Обрабатываем ошибку, если формат времени неверен
+                await update.callback_query.message.reply_text(f"Ошибка в формате времени для анкеты {survey['name']}.")
+                continue
+
+        # Добавляем анкету в список, если она доступна для заполнения
+        keyboard.append([InlineKeyboardButton(survey['name'], callback_data=f'{survey["name"]}')])
+
+    if keyboard:
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.callback_query.message.reply_text("Выберите анкету для заполнения:", reply_markup=reply_markup)
+    else:
+        await update.callback_query.message.reply_text("На данный момент нет доступных анкет.")
+
+
+# async def start_survey(update: Update, survey_name: str) -> None:
+#     """Начинает процесс заполнения выбранной анкеты"""
+#     chat_id = update.callback_query.message.chat_id
+#   #  survey_name= survey_name.replace("fill_", "")
+#     # Получаем выбранную анкету
+#     selected_survey = next((s for s in json_schema["surveys"] if s["name"] == survey_name), None)
+#
+#     if not selected_survey:
+#      #   await update.callback_query.message.reply_text("Анкета не найдена.")
+#         return
+#
+#     interval_hours = selected_survey.get("interval", 24)
+#     remaining_time = get_remaining_time(chat_id, survey_name, interval_hours)
+#
+#     if remaining_time:
+#         await update.callback_query.message.reply_text(
+#             f"Вы уже заполнили анкету. Повторное заполнение возможно через {remaining_time}.")
+#         return
+#
+#     user_data[chat_id] = {"step": 0, "responses": {}, "survey": selected_survey}
+#     await ask_question(update.callback_query.message, chat_id)
+#
+import datetime
 
 async def start_survey(update: Update, survey_name: str) -> None:
     """Начинает процесс заполнения выбранной анкеты"""
     chat_id = update.callback_query.message.chat_id
-  #  survey_name= survey_name.replace("fill_", "")
-    # Получаем выбранную анкету
     selected_survey = next((s for s in json_schema["surveys"] if s["name"] == survey_name), None)
 
     if not selected_survey:
-     #   await update.callback_query.message.reply_text("Анкета не найдена.")
+        await update.callback_query.message.reply_text("Анкета не найдена.")
         return
 
     interval_hours = selected_survey.get("interval", 24)
@@ -114,7 +171,23 @@ async def start_survey(update: Update, survey_name: str) -> None:
             f"Вы уже заполнили анкету. Повторное заполнение возможно через {remaining_time}.")
         return
 
-    user_data[chat_id] = {"step": 0, "responses": {}, "survey": selected_survey}
+    # Проверяем, истекло ли время начала
+    start_time_str = selected_survey.get("start_time")
+    duration_hours = selected_survey.get("duration", 0)
+
+    if start_time_str:
+        start_time = datetime.datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
+        current_time = datetime.datetime.now()
+        if current_time < start_time:
+            await update.callback_query.message.reply_text("Анкета еще недоступна.")
+            return
+
+        end_time = start_time + datetime.timedelta(hours=duration_hours)
+        if current_time > end_time:
+            await update.callback_query.message.reply_text("Время на заполнение анкеты истекло.")
+            return
+
+    user_data[chat_id] = {"step": 0, "responses": {}, "survey": selected_survey, "start_time": time.time()}
     await ask_question(update.callback_query.message, chat_id)
 
 
@@ -128,10 +201,16 @@ async def ask_question(message, chat_id: int) -> None:
         question = survey["form"][step]["name"]
         await message.reply_text(question)
     else:
+        # Сохраняем ответы и благодарим за заполнение
         await save_survey_response(chat_id, survey["name"], user_info["responses"])
         await message.reply_text("Спасибо за заполнение анкеты!")
-        await start(message, None)
 
+        # Возвращаем пользователя в главное меню, вызывая start
+        update = Update(  # Создаём новый объект Update для вызова start
+            update_id=message.message_id,
+            message=message  # Передаём текущее сообщение
+        )
+        await start(update, None)
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: dict) -> None:
     """Обработка ответов на вопросы анкеты"""
     chat_id = update.message.chat_id
