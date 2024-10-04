@@ -85,6 +85,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         # Запрашиваем логин и пароль администратора
         await admin_login(update, context)
     elif query.data in ['yes','no']:
+
         await handle_more_questions_button(update, context)
     elif query.data == 'fill_survey':
         await show_survey_selection(update)
@@ -340,9 +341,16 @@ async def handle_more_questions_button(update: Update, context: ContextTypes.DEF
         await query.edit_message_text(f"Анкета '{context.user_data['new_survey']['name']}' добавлена!")
         context.user_data.pop('adding_survey', None)
         context.user_data.pop('new_survey', None)
+        user_state[query.message.chat_id]=None
+
         # Запускаем команду /start
         load_json_schema()
-        await start(update, context)
+        update = Update(  # Создаём новый объект Update для вызова start
+            update_id=query.message.message_id,
+            message=query.message  # Передаём текущее сообщение
+        )
+        await start(update, None)
+        #await start(update, context)
 async def add_survey(update: Update, context: ContextTypes.DEFAULT_TYPE,chat_id) -> None:
     """Начало процесса добавления новой анкеты"""
     await update.callback_query.message.reply_text("Введите имя новой анкеты:")
@@ -351,47 +359,71 @@ async def add_survey(update: Update, context: ContextTypes.DEFAULT_TYPE,chat_id)
     context.user_data['new_survey']['form'] = []  # Список вопросов новой анкеты
     user_state[chat_id] = "start_surv";
 
-
 async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработка ввода администратора для добавления новой анкеты"""
     if context.user_data.get('adding_survey'):
         if 'name' not in context.user_data['new_survey']:
-            # Сохраняем имя анкеты
-            context.user_data['new_survey']['name'] = update.message.text
+            new_survey_name = update.message.text
+
+            # Проверка на уникальность названия анкеты в json_schema
+            for survey in json_schema['surveys']:
+                if survey['name'].lower() == new_survey_name.lower():
+                    await update.message.reply_text("Анкета с таким названием уже существует. Введите другое название.")
+                    return
+
+            # Сохраняем уникальное имя анкеты
+            context.user_data['new_survey']['name'] = new_survey_name
             await update.message.reply_text(
-                "Введите время начала анкеты в формате YYYY-MM-DD HH:MM (например, 2024-10-04 12:00):")
+                "Введите время начала анкеты в формате YYYY-MM-DD HH:MM (или введите 0, чтобы оставить пустым):")
             context.user_data['waiting_for_start_time'] = True
+
         elif context.user_data.get('waiting_for_start_time'):
             # Сохраняем время начала анкеты
             start_time_text = update.message.text
-            try:
-                # Пробуем преобразовать введенное время в datetime
-                start_time = datetime.datetime.strptime(start_time_text, "%Y-%m-%d %H:%M")
-                context.user_data['new_survey']['start_time'] = start_time.strftime("%Y-%m-%d %H:%M")
+            if start_time_text == "0":
+                context.user_data['new_survey']['start_time'] = ""  # Оставляем пустым
                 await update.message.reply_text("Введите продолжительность анкеты в часах:")
                 context.user_data['waiting_for_duration'] = True
                 context.user_data.pop('waiting_for_start_time', None)
-            except ValueError:
-                await update.message.reply_text(
-                    "Некорректный формат времени. Попробуйте еще раз в формате YYYY-MM-DD HH:MM.")
+            else:
+                try:
+                    # Пробуем преобразовать введенное время в datetime
+                    start_time = datetime.datetime.strptime(start_time_text, "%Y-%m-%d %H:%M")
+                    context.user_data['new_survey']['start_time'] = start_time.strftime("%Y-%m-%d %H:%M")
+                    await update.message.reply_text("Введите продолжительность анкеты в часах:")
+                    context.user_data['waiting_for_duration'] = True
+                    context.user_data.pop('waiting_for_start_time', None)
+                except ValueError:
+                    await update.message.reply_text(
+                        "Некорректный формат времени. Попробуйте еще раз в формате YYYY-MM-DD HH:MM или введите 0.")
 
         elif context.user_data.get('waiting_for_duration'):
             # Сохраняем продолжительность анкеты
             try:
                 duration = int(update.message.text)  # Преобразуем введенное значение в целое число
                 context.user_data['new_survey']['duration'] = duration
-                context.user_data['new_survey']['form'] = []  # Инициализируем форму
-                await update.message.reply_text("Введите первый вопрос для анкеты:")
-                context.user_data['waiting_for_question'] = True
+                await update.message.reply_text("Введите интервал между повторным заполнением анкеты в часах:")
+                context.user_data['waiting_for_interval'] = True
                 context.user_data.pop('waiting_for_duration', None)
             except ValueError:
                 await update.message.reply_text("Некорректное значение. Пожалуйста, введите продолжительность в часах.")
 
+        elif context.user_data.get('waiting_for_interval'):
+            # Сохраняем интервал между повторными заполнениями анкеты
+            try:
+                interval = int(update.message.text)  # Преобразуем введенное значение в целое число
+                context.user_data['new_survey']['interval'] = interval
+                context.user_data['new_survey']['form'] = []  # Инициализируем форму для вопросов анкеты
+                await update.message.reply_text("Введите первый вопрос для анкеты:")
+                context.user_data['waiting_for_question'] = True
+                context.user_data.pop('waiting_for_interval', None)
+            except ValueError:
+                await update.message.reply_text("Некорректное значение. Пожалуйста, введите интервал в часах.")
+
         elif context.user_data.get('waiting_for_question'):
             # Добавляем новый вопрос
             question_text = update.message.text
-            context.user_data['new_question'] = {"name": question_text, "type": "text",
-                                                 "ogr": "optional"}  # Устанавливаем значения по умолчанию
+            context.user_data['new_question'] = {"name": question_text, "type": "text", "ogr": "optional"}
             context.user_data['new_survey']['form'].append(context.user_data['new_question'])
             context.user_data.pop('new_question', None)
 
@@ -404,7 +436,6 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await update.message.reply_text("Добавить еще один вопрос?", reply_markup=reply_markup)
             context.user_data['waiting_for_more_questions'] = True
             context.user_data.pop('waiting_for_question', None)
-
 
 async def save_new_survey(survey: dict) -> None:
     """Сохраняет новую анкету в JSON-файл"""
