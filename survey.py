@@ -30,28 +30,7 @@ def init_db():
 if not os.path.exists(DATABASE):
     init_db()
 
-# Пример JSON схемы анкеты с несколькими анкетами
-# json_schema = {
-#     "surveys": [
-#         {
-#             "name": "Анкета 1",
-#             "form": [
-#                 {"name": "Имя", "type": "text", "ogr": "required"},
-#                 {"name": "Возраст", "type": "number", "ogr": "min=0"},
-#                 {"name": "Email", "type": "email", "ogr": "required"},
-#             ],
-#             "interval": 48  # Интервал между заполнениями анкеты в часах
-#         },
-#         {
-#             "name": "Анкета 2",
-#             "form": [
-#                 {"name": "Город", "type": "text", "ogr": "optional"},
-#                 {"name": "Профессия", "type": "text", "ogr": "optional"}
-#             ],
-#             "interval": 24
-#         }
-#     ]
-# }
+
 
 user_data = {}
 
@@ -80,6 +59,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     await query.answer()
     if query.data.startswith('download_'):
         survey_name = query.data[len('download_'):]  # Извлекаем название анкеты
+        #await handle_date_input(update, context)
         await download_survey_csv(update, context, survey_name)  # Переходим к скачиванию
     print( query.data )
     if query.data == 'download_surveys':
@@ -150,7 +130,7 @@ async def ask_question(message, chat_id: int) -> None:
     else:
         await save_survey_response(chat_id, survey["name"], user_info["responses"])
         await message.reply_text("Спасибо за заполнение анкеты!")
-
+        await start(message, None)
 
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: dict) -> None:
     """Обработка ответов на вопросы анкеты"""
@@ -308,16 +288,81 @@ async def download_survey_csv(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Скачивание выбранной анкеты в формате CSV."""
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
-        cursor.execute('SELECT answers, timestamp FROM responses WHERE survey_name = ?', (survey_name,))
+        cursor.execute('SELECT answers, timestamp,survey_name FROM responses WHERE survey_name = ?', (survey_name,))
+        rows = cursor.fetchall()
+        # Создаем CSV-файл в памяти
+        output = StringIO()
+        header = ['Timestamp', 'Survey Name']  # Начинаем с временной метки и названия анкеты
+        csv_writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+        # Получаем уникальные ключи из всех ответов
+        all_keys = set()
+        for row in rows:
+            answers = json.loads(row[0])  # Обратите внимание, что answers находится во втором индексе
+            all_keys.update(answers.keys())
+        header.extend(all_keys)
+        csv_writer.writerow(header)
+
+        for row in rows:
+            answers = json.loads(row[0])
+            csv_row = [row[1], row[2]]  # Временная метка и название анкеты
+            csv_row.extend([answers.get(key, '') for key in all_keys])
+            csv_writer.writerow(csv_row)
+
+        output.seek(0)
+
+
+
+
+        await update.callback_query.message.reply_document(
+            document=output.getvalue().encode('windows-1251'),
+            filename=f'{survey_name}.csv'
+        )
+        await update.callback_query.answer("Анкета загружена.")
+
+        async def select_date_range(update: Update) -> None:
+            """Запрашивает у пользователя диапазон дат для скачивания анкеты."""
+            query = update.callback_query
+            await query.answer()
+
+            await query.message.reply_text("Введите дату начала (в формате YYYY-MM-DD):")
+            user_state[query.message.chat_id] = "waiting_for_start_date"  # Устанавливаем состояние для ожидания даты начала
+
+    async def handle_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Обрабатывает ввод дат для скачивания анкет."""
+        chat_id = update.message.chat_id
+
+        if user_state.get(chat_id) == "waiting_for_start_date":
+            user_state[chat_id] = "waiting_for_end_date"  # Переход к ожиданию даты окончания
+            context.user_data['start_date'] = update.message.text  # Сохраняем дату начала
+            await update.message.reply_text("Введите дату окончания (в формате YYYY-MM-DD):")
+        elif user_state.get(chat_id) == "waiting_for_end_date":
+            user_state[chat_id] = None  # Сбрасываем состояние
+            context.user_data['end_date'] = update.message.text  # Сохраняем дату окончания
+            await download_survey_csv(update, context)  # Переходим к скачиванию
+
+
+async def download_survey_csv2(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Скачивание выбранной анкеты в формате CSV с учетом диапазона дат."""
+    chat_id = update.callback_query.message.chat_id
+    survey_name = context.user_data.get('survey_name')  # Имя анкеты из контекста
+    start_date = context.user_data.get('start_date')
+    end_date = context.user_data.get('end_date')
+
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT answers, timestamp FROM responses 
+            WHERE survey_name = ? AND timestamp BETWEEN ? AND ?
+        ''', (survey_name, start_date, end_date))
         rows = cursor.fetchall()
 
         if not rows:
-            await update.callback_query.message.reply_text("Нет ответов для данной анкеты.")
+            await update.callback_query.message.reply_text("Нет ответов для данной анкеты в указанный диапазон дат.")
             return
 
         # Создаем CSV-файл в памяти
         output = StringIO()
-        header = ['Timestamp', 'Answers']  # Заголовки (можно изменить по необходимости)
+        header = ['Timestamp', 'Answers']  # Заголовки
         csv_writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
         csv_writer.writerow(header)
 
@@ -333,3 +378,17 @@ async def download_survey_csv(update: Update, context: ContextTypes.DEFAULT_TYPE
             filename=f'{survey_name}.csv'
         )
         await update.callback_query.answer("Анкета загружена.")
+
+
+async def handle_date_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает ввод дат для скачивания анкет."""
+    chat_id = update.message.chat_id
+
+    if user_state.get(chat_id) == "waiting_for_start_date":
+        user_state[chat_id] = "waiting_for_end_date"  # Переход к ожиданию даты окончания
+        context.user_data['start_date'] = update.message.text  # Сохраняем дату начала
+        await update.message.reply_text("Введите дату окончания (в формате YYYY-MM-DD):")
+    elif user_state.get(chat_id) == "waiting_for_end_date":
+        user_state[chat_id] = None  # Сбрасываем состояние
+        context.user_data['end_date'] = update.message.text  # Сохраняем дату окончания
+        await download_survey_csv(update, context)  # Переходим к скачиванию
