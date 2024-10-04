@@ -32,7 +32,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         # Иначе считаем, что это ответы на анкету
         await handle_response(update, context, user_state)
 
-#
+
 # async def admin_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 #     """Запуск процесса логина администратора"""
 #     chat_id = update.message.chat_id

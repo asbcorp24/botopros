@@ -14,13 +14,66 @@ Telegram Survey Bot
 bash
 Копировать код
 git clone [https://github.com/yourusername/yourproject.git](https://github.com/asbcorp24/botopros)
+
 cd yourproject
+
 Установите зависимости:
 
 bash
 Копировать код
 pip install python-telegram-bot==20.0
+
 Настройте файл конфигурации config.json с токеном бота и данными администратора.
+
+Формат конфигурации
+
+Опросы хранятся в файле конфигурации в следующем формате:
+
+json
+
+{
+    "surveys": [
+        {
+            "name": "Анкета 1",
+            "form": [
+                {
+                    "name": "Имя",
+                    "type": "text",
+                    "ogr": "required"
+                },
+                {
+                    "name": "Возраст",
+                    "type": "number",
+                    "ogr": "min=0"
+                },
+                {
+                    "name": "Email",
+                    "type": "email",
+                    "ogr": "required"
+                }
+            ],
+            "interval": 48,
+            "start_time": "2024-10-04 12:00",
+            "duration": 12
+        }
+    ]
+}
+name: Имя опроса.
+
+form: Список вопросов с параметрами:
+
+name: Текст вопроса.
+
+type: Тип данных (text, number, email).
+
+ogr: Ограничения (например, обязательное поле, минимальные значения).
+
+interval: Интервал (в часах), через который пользователь может заново заполнить опрос.
+
+start_time: Время начала доступности опроса (формат YYYY-MM-DD HH:mm).
+
+duration: Длительность опроса (в часах), после которой он становится недоступным для заполнения.
+
 
 Запустите бота:
 

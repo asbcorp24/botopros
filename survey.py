@@ -242,6 +242,21 @@ async def ask_question(message, chat_id: int) -> None:
             message=message  # Передаём текущее сообщение
         )
         await start(update, None)
+# async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: dict) -> None:
+#     """Обработка ответов на вопросы анкеты"""
+#     chat_id = update.message.chat_id
+#     user_info = user_data.get(chat_id)
+#
+#     if not user_info:
+#         return
+#
+#     step = user_info.get("step")
+#     survey = user_info["survey"]
+#     if step < len(survey["form"]):
+#         question = survey["form"][step]
+#         user_info["responses"][question["name"]] = update.message.text
+#         user_info["step"] += 1
+#         await ask_question(update.message, chat_id)
 async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE, user_state: dict) -> None:
     """Обработка ответов на вопросы анкеты"""
     chat_id = update.message.chat_id
@@ -254,9 +269,50 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE, us
     survey = user_info["survey"]
     if step < len(survey["form"]):
         question = survey["form"][step]
-        user_info["responses"][question["name"]] = update.message.text
+        user_response = update.message.text
+
+
+        # Проверка ограничений (ogr)
+        ogr = question.get("ogr", "")
+        validation_result, error_message = validate_response(user_response, ogr)
+
+        if not validation_result:
+            await update.message.reply_text(error_message)
+            return  # Не переходим к следующему вопросу, пока ответ не будет корректным
+
+        # Сохраняем ответ
+        user_info["responses"][question["name"]] = user_response
         user_info["step"] += 1
         await ask_question(update.message, chat_id)
+
+def validate_response(response: str, ogr: str) -> tuple:
+    """Валидация ответа в соответствии с ограничениями (ogr).
+    Возвращает кортеж (bool, str), где bool указывает на успешность валидации,
+    а str - сообщение об ошибке в случае неуспеха.
+    """
+    for constraint in ogr.split(","):
+        constraint = constraint.strip()
+        if constraint.startswith("max>"):
+            max_value = int(constraint.split(">")[1])
+            if not response.isdigit() or int(response) > max_value:
+                return False, f"Ответ должен быть меньше или равен {max_value}."
+        elif constraint.startswith("min<"):
+            min_value = int(constraint.split("<")[1])
+            if not response.isdigit() or int(response) < min_value:
+                return False, f"Ответ должен быть больше или равен {min_value}."
+        elif constraint.startswith("mask="):
+            mask = constraint.split("=")[1].strip("[]")
+            if len(response) != len(mask):
+                return False, f"Длина ответа должна быть {len(mask)} символов."
+            for r_char, m_char in zip(response, mask):
+                if m_char != '?' and r_char != m_char:
+                    return False, f"Ответ не соответствует маске {mask}."
+        elif constraint.startswith("length="):
+            length = int(constraint.split("=")[1])
+            if len(response) != length:
+                return False, f"Ответ должен содержать ровно {length} символов."
+
+    return True, "Ответ принят."  # Если все проверки пройдены
 
 
 async  def save_survey_response(chat_id, survey_name, responses):
@@ -358,7 +414,6 @@ async def add_survey(update: Update, context: ContextTypes.DEFAULT_TYPE,chat_id)
     context.user_data['new_survey'] = {}  # Храним временные данные новой анкеты
     context.user_data['new_survey']['form'] = []  # Список вопросов новой анкеты
     user_state[chat_id] = "start_surv";
-
 async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработка ввода администратора для добавления новой анкеты"""
     if context.user_data.get('adding_survey'):
@@ -425,7 +480,17 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
             question_text = update.message.text
             context.user_data['new_question'] = {"name": question_text, "type": "text", "ogr": "optional"}
             context.user_data['new_survey']['form'].append(context.user_data['new_question'])
-            context.user_data.pop('new_question', None)
+
+
+            # Запрашиваем ограничения
+            await update.message.reply_text("Введите ограничения (например, max>100, min<0, mask=[?.?], length=10):")
+            context.user_data['waiting_for_ogr'] = True
+            context.user_data.pop('waiting_for_question', None)
+        elif context.user_data.get('waiting_for_ogr'):
+            # Сохраняем ограничения для последнего вопроса
+            ogr_text = update.message.text
+            context.user_data['new_question']['ogr'] = ogr_text
+            context.user_data.pop('waiting_for_ogr', None)
 
             # Показываем кнопки для добавления ещё одного вопроса
             keyboard = [
