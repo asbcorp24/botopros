@@ -2,6 +2,7 @@ import sqlite3
 import os
 import json
 import datetime
+import time
 import csv
 from io import StringIO
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -98,36 +99,64 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 import datetime
 
 
+# async def show_survey_selection(update: Update) -> None:
+#     """Показывает список доступных анкет, которые можно заполнить на текущий момент"""
+#     current_time = datetime.datetime.now()
+#
+#     keyboard = []
+#
+#     # Проходим по всем анкетам в json_schema
+#     for survey in json_schema["surveys"]:
+#         start_time_str = survey.get("start_time", "")
+#
+#         # Если поле start_time существует и не пусто, проверяем время начала
+#         if start_time_str:
+#             try:
+#                 start_time = datetime.datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
+#                 if current_time < start_time:
+#                     # Если текущее время меньше времени начала, пропускаем эту анкету
+#                     continue
+#             except ValueError:
+#                 # Обрабатываем ошибку, если формат времени неверен
+#                 await update.callback_query.message.reply_text(f"Ошибка в формате времени для анкеты {survey['name']}.")
+#                 continue
+#
+#         # Добавляем анкету в список, если она доступна для заполнения
+#         keyboard.append([InlineKeyboardButton(survey['name'], callback_data=f'{survey["name"]}')])
+#
+#     if keyboard:
+#         reply_markup = InlineKeyboardMarkup(keyboard)
+#         await update.callback_query.message.reply_text("Выберите анкету для заполнения:", reply_markup=reply_markup)
+#     else:
+#         await update.callback_query.message.reply_text("На данный момент нет доступных анкет.")
 async def show_survey_selection(update: Update) -> None:
-    """Показывает список доступных анкет, которые можно заполнить на текущий момент"""
+    """Показывает список доступных анкет"""
+    keyboard = []
     current_time = datetime.datetime.now()
 
-    keyboard = []
-
-    # Проходим по всем анкетам в json_schema
     for survey in json_schema["surveys"]:
-        start_time_str = survey.get("start_time", "")
+        start_time_str = survey.get("start_time")
+        duration_hours = survey.get("duration", 0)  # Получаем продолжительность, если указана
 
-        # Если поле start_time существует и не пусто, проверяем время начала
+        # Проверяем время начала и окончания
         if start_time_str:
-            try:
-                start_time = datetime.datetime.strptime(start_time_str, "%Y-%m-%d %H")
-                if current_time < start_time:
-                    # Если текущее время меньше времени начала, пропускаем эту анкету
-                    continue
-            except ValueError:
-                # Обрабатываем ошибку, если формат времени неверен
-                await update.callback_query.message.reply_text(f"Ошибка в формате времени для анкеты {survey['name']}.")
-                continue
+            if len(start_time_str) == 13:
+                start_time_str += ':00'  # Добавляем минуты
+            start_time = datetime.datetime.strptime(start_time_str, "%Y-%m-%d %H:%M")
+            end_time = start_time + datetime.timedelta(hours=duration_hours)
 
-        # Добавляем анкету в список, если она доступна для заполнения
+            # Проверка: анкета доступна только если текущее время в пределах начала и конца
+            if not (start_time <= current_time <= end_time):
+                continue  # Пропускаем эту анкету, если время не подходит
+
+        # Если все проверки пройдены, добавляем анкету в список
         keyboard.append([InlineKeyboardButton(survey['name'], callback_data=f'{survey["name"]}')])
 
     if keyboard:
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.callback_query.message.reply_text("Выберите анкету для заполнения:", reply_markup=reply_markup)
     else:
-        await update.callback_query.message.reply_text("На данный момент нет доступных анкет.")
+        await update.callback_query.message.reply_text("Нет доступных анкет.")
 
 
 # async def start_survey(update: Update, survey_name: str) -> None:
@@ -320,18 +349,48 @@ async def add_survey(update: Update, context: ContextTypes.DEFAULT_TYPE,chat_id)
     context.user_data['new_survey'] = {}  # Храним временные данные новой анкеты
     context.user_data['new_survey']['form'] = []  # Список вопросов новой анкеты
     user_state[chat_id] = "start_surv";
+
+
 async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработка ввода администратора для добавления новой анкеты"""
     if context.user_data.get('adding_survey'):
         if 'name' not in context.user_data['new_survey']:
             # Сохраняем имя анкеты
             context.user_data['new_survey']['name'] = update.message.text
-            await update.message.reply_text("Введите первый вопрос для анкеты:")
-            context.user_data['waiting_for_question'] = True
+            await update.message.reply_text(
+                "Введите время начала анкеты в формате YYYY-MM-DD HH:MM (например, 2024-10-04 12:00):")
+            context.user_data['waiting_for_start_time'] = True
+        elif context.user_data.get('waiting_for_start_time'):
+            # Сохраняем время начала анкеты
+            start_time_text = update.message.text
+            try:
+                # Пробуем преобразовать введенное время в datetime
+                start_time = datetime.datetime.strptime(start_time_text, "%Y-%m-%d %H:%M")
+                context.user_data['new_survey']['start_time'] = start_time.strftime("%Y-%m-%d %H:%M")
+                await update.message.reply_text("Введите продолжительность анкеты в часах:")
+                context.user_data['waiting_for_duration'] = True
+                context.user_data.pop('waiting_for_start_time', None)
+            except ValueError:
+                await update.message.reply_text(
+                    "Некорректный формат времени. Попробуйте еще раз в формате YYYY-MM-DD HH:MM.")
+
+        elif context.user_data.get('waiting_for_duration'):
+            # Сохраняем продолжительность анкеты
+            try:
+                duration = int(update.message.text)  # Преобразуем введенное значение в целое число
+                context.user_data['new_survey']['duration'] = duration
+                context.user_data['new_survey']['form'] = []  # Инициализируем форму
+                await update.message.reply_text("Введите первый вопрос для анкеты:")
+                context.user_data['waiting_for_question'] = True
+                context.user_data.pop('waiting_for_duration', None)
+            except ValueError:
+                await update.message.reply_text("Некорректное значение. Пожалуйста, введите продолжительность в часах.")
+
         elif context.user_data.get('waiting_for_question'):
             # Добавляем новый вопрос
             question_text = update.message.text
-            context.user_data['new_question'] = {"name": question_text, "type": "text", "ogr": "optional"}  # Устанавливаем значения по умолчанию
+            context.user_data['new_question'] = {"name": question_text, "type": "text",
+                                                 "ogr": "optional"}  # Устанавливаем значения по умолчанию
             context.user_data['new_survey']['form'].append(context.user_data['new_question'])
             context.user_data.pop('new_question', None)
 
