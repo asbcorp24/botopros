@@ -1,6 +1,6 @@
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, CallbackQueryHandler
 from admin import admin_login, handle_admin_credentials
-from survey import start, button_handler, download_surveys, handle_response,add_survey
+from survey import start, button_handler, download_surveys, handle_response,add_survey,handle_admin_input,handle_more_questions_button
 import json
 import os
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -19,15 +19,18 @@ def load_json_schema():
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Главный обработчик текстовых сообщений, который переключает между режимами"""
     chat_id = update.message.chat_id
+    message_text = update.message.text.lower()
 
     # Проверка состояния пользователя
     if user_state.get(chat_id) == 'admin_login':
         # Если пользователь вводит логин и пароль
         await handle_admin_credentials(update, context)
+    elif user_state.get(chat_id) == 'start_surv':
+        await handle_admin_input(update, context)
 
     else:
         # Иначе считаем, что это ответы на анкету
-        await handle_response(update, context)
+        await handle_response(update, context, user_state)
 
 
 async def admin_login(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:

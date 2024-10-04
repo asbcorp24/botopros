@@ -78,13 +78,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Обработка нажатий кнопок в меню"""
     query = update.callback_query
     await query.answer()
+    if query.data.startswith('download_'):
+        survey_name = query.data[len('download_'):]  # Извлекаем название анкеты
+        await download_survey_csv(update, context, survey_name)  # Переходим к скачиванию
     print( query.data )
+    if query.data == 'download_surveys':
+        #await download_surveys(update, context)
+        await show_available_surveys(update)  # Показываем список анкет
     if query.data == 'add_survey':
-        await add_survey(update, context)
+        await add_survey(update, context,query.message.chat_id)
     elif query.data == 'admin':
         # Запрашиваем логин и пароль администратора
         await admin_login(update, context)
-
+    elif query.data in ['yes','no']:
+        await handle_more_questions_button(update, context)
     elif query.data == 'fill_survey':
         await show_survey_selection(update)
     elif query.data == 'logout':
@@ -94,6 +101,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         await start(update, context)  # Возвращаем в главное меню
     else :
         await start_survey(update,query.data)
+
 
 
 async def show_survey_selection(update: Update) -> None:
@@ -115,7 +123,7 @@ async def start_survey(update: Update, survey_name: str) -> None:
     selected_survey = next((s for s in json_schema["surveys"] if s["name"] == survey_name), None)
 
     if not selected_survey:
-        await update.callback_query.message.reply_text("Анкета не найдена.")
+     #   await update.callback_query.message.reply_text("Анкета не найдена.")
         return
 
     interval_hours = selected_survey.get("interval", 24)
@@ -161,7 +169,7 @@ async def handle_response(update: Update, context: ContextTypes.DEFAULT_TYPE, us
         await ask_question(update.message, chat_id)
 
 
-def save_survey_response(chat_id, survey_name, responses):
+async  def save_survey_response(chat_id, survey_name, responses):
     """Сохраняет ответы на анкету в базу данных"""
     with sqlite3.connect(DATABASE) as conn:
         cursor = conn.cursor()
@@ -227,16 +235,36 @@ def get_remaining_time(chat_id, survey_name, interval_hours):
                 minutes = remainder // 60
                 return f"{hours} час(ов) и {minutes} минут(ы)"
     return None
-async def add_survey(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+
+
+async def handle_more_questions_button(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Обрабатывает нажатие кнопок 'Да' или 'Нет' для добавления дополнительных вопросов."""
+    query = update.callback_query
+    await query.answer()  # Закрываем уведомление с кнопками
+
+    if query.data == 'yes':
+        await query.edit_message_text("Введите следующий вопрос:")
+        context.user_data['waiting_for_question'] = True
+    else:
+        # Заканчиваем добавление анкеты и сохраняем её
+        await save_new_survey(context.user_data['new_survey'])
+        await query.edit_message_text(f"Анкета '{context.user_data['new_survey']['name']}' добавлена!")
+        context.user_data.pop('adding_survey', None)
+        context.user_data.pop('new_survey', None)
+        # Запускаем команду /start
+        load_json_schema()
+        await start(update, context)
+async def add_survey(update: Update, context: ContextTypes.DEFAULT_TYPE,chat_id) -> None:
     """Начало процесса добавления новой анкеты"""
     await update.callback_query.message.reply_text("Введите имя новой анкеты:")
     context.user_data['adding_survey'] = True  # Флаг начала процесса добавления анкеты
     context.user_data['new_survey'] = {}  # Храним временные данные новой анкеты
     context.user_data['new_survey']['form'] = []  # Список вопросов новой анкеты
+    user_state[chat_id] = "start_surv";
 async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Обработка ввода администратора для добавления новой анкеты"""
     if context.user_data.get('adding_survey'):
-        if 'survey_name' not in context.user_data['new_survey']:
+        if 'name' not in context.user_data['new_survey']:
             # Сохраняем имя анкеты
             context.user_data['new_survey']['name'] = update.message.text
             await update.message.reply_text("Введите первый вопрос для анкеты:")
@@ -244,38 +272,20 @@ async def handle_admin_input(update: Update, context: ContextTypes.DEFAULT_TYPE)
         elif context.user_data.get('waiting_for_question'):
             # Добавляем новый вопрос
             question_text = update.message.text
-            await update.message.reply_text("Введите тип вопроса (text, number, email):")
-            context.user_data['new_question'] = {"name": question_text}  # Сохраняем вопрос временно
-            context.user_data['waiting_for_type'] = True
-            context.user_data.pop('waiting_for_question', None)
-        elif context.user_data.get('waiting_for_type'):
-            # Сохраняем тип вопроса
-            question_type = update.message.text
-            context.user_data['new_question']['type'] = question_type
-            await update.message.reply_text("Введите ограничения (required, optional):")
-            context.user_data['waiting_for_constraints'] = True
-            context.user_data.pop('waiting_for_type', None)
-        elif context.user_data.get('waiting_for_constraints'):
-            # Сохраняем ограничения и добавляем вопрос в список анкеты
-            constraints = update.message.text
-            context.user_data['new_question']['ogr'] = constraints
+            context.user_data['new_question'] = {"name": question_text, "type": "text", "ogr": "optional"}  # Устанавливаем значения по умолчанию
             context.user_data['new_survey']['form'].append(context.user_data['new_question'])
             context.user_data.pop('new_question', None)
-            await update.message.reply_text("Добавить еще один вопрос? (да/нет)")
+
+            # Показываем кнопки для добавления ещё одного вопроса
+            keyboard = [
+                [InlineKeyboardButton("Да", callback_data='yes')],
+                [InlineKeyboardButton("Нет", callback_data='no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("Добавить еще один вопрос?", reply_markup=reply_markup)
             context.user_data['waiting_for_more_questions'] = True
-            context.user_data.pop('waiting_for_constraints', None)
-        elif context.user_data.get('waiting_for_more_questions'):
-            # Обрабатываем добавление дополнительных вопросов
-            if update.message.text.lower() == 'да':
-                await update.message.reply_text("Введите следующий вопрос:")
-                context.user_data['waiting_for_question'] = True
-                context.user_data.pop('waiting_for_more_questions', None)
-            else:
-                # Заканчиваем добавление анкеты и сохраняем её
-                await save_new_survey(context.user_data['new_survey'])
-                await update.message.reply_text(f"Анкета '{context.user_data['new_survey']['name']}' добавлена!")
-                context.user_data.pop('adding_survey', None)
-                context.user_data.pop('new_survey', None)
+            context.user_data.pop('waiting_for_question', None)
+
 
 async def save_new_survey(survey: dict) -> None:
     """Сохраняет новую анкету в JSON-файл"""
@@ -285,3 +295,41 @@ async def save_new_survey(survey: dict) -> None:
         f.seek(0)  # Возвращаемся в начало файла
         json.dump(schema, f, ensure_ascii=False, indent=4)  # Сохраняем обновленный JSON
         f.truncate()  # Удаляем старое содержимое, которое осталось после записи
+async def show_available_surveys(update: Update) -> None:
+    """Показывает список доступных анкет для скачивания."""
+    keyboard = [
+        [InlineKeyboardButton(survey['name'], callback_data=f'download_{survey["name"]}')]
+        for survey in json_schema["surveys"]
+    ]
+    keyboard.append([InlineKeyboardButton("Отмена", callback_data='cancel_download')])  # Кнопка отмены
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.callback_query.message.reply_text("Выберите анкету для скачивания:", reply_markup=reply_markup)
+async def download_survey_csv(update: Update, context: ContextTypes.DEFAULT_TYPE, survey_name: str) -> None:
+    """Скачивание выбранной анкеты в формате CSV."""
+    with sqlite3.connect(DATABASE) as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT answers, timestamp FROM responses WHERE survey_name = ?', (survey_name,))
+        rows = cursor.fetchall()
+
+        if not rows:
+            await update.callback_query.message.reply_text("Нет ответов для данной анкеты.")
+            return
+
+        # Создаем CSV-файл в памяти
+        output = StringIO()
+        header = ['Timestamp', 'Answers']  # Заголовки (можно изменить по необходимости)
+        csv_writer = csv.writer(output, delimiter=';', quoting=csv.QUOTE_MINIMAL)
+        csv_writer.writerow(header)
+
+        for row in rows:
+            answers = json.loads(row[0])
+            csv_row = [row[1], answers]  # Временная метка и ответы
+            csv_writer.writerow(csv_row)
+
+        output.seek(0)
+
+        await update.callback_query.message.reply_document(
+            document=output.getvalue().encode('windows-1251'),
+            filename=f'{survey_name}.csv'
+        )
+        await update.callback_query.answer("Анкета загружена.")

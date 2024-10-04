@@ -1,22 +1,80 @@
 {
-  "surveys": [
-    {
-      "name": "Анкета 1",
-      "form": [
-        {"name": "Имя", "type": "text", "ogr": "required"},
-        {"name": "Возраст", "type": "number", "ogr": "min=0"},
-        {"name": "Email", "type": "email", "ogr": "required"},
-        {"name": "Город", "type": "text", "ogr": "optional"},
-        {"name": "Профессия", "type": "text", "ogr": "optional"}
-      ]
-    },
-    {
-      "name": "Анкета 2",
-      "form": [
-        {"name": "Название проекта", "type": "text", "ogr": "required"},
-        {"name": "Срок выполнения", "type": "date", "ogr": "required"}
-      ]
-    }
-  ],
-  "interval": 48
+    "surveys": [
+        {
+            "name": "Анкета 1",
+            "form": [
+                {
+                    "name": "Имя",
+                    "type": "text",
+                    "ogr": "required"
+                },
+                {
+                    "name": "Возраст",
+                    "type": "number",
+                    "ogr": "min=0"
+                },
+                {
+                    "name": "Email",
+                    "type": "email",
+                    "ogr": "required"
+                },
+                {
+                    "name": "Город",
+                    "type": "text",
+                    "ogr": "optional"
+                },
+                {
+                    "name": "Профессия",
+                    "type": "text",
+                    "ogr": "optional"
+                }
+            ]
+        },
+        {
+            "name": "Анкета 2",
+            "form": [
+                {
+                    "name": "Название проекта",
+                    "type": "text",
+                    "ogr": "required"
+                },
+                {
+                    "name": "Срок выполнения",
+                    "type": "date",
+                    "ogr": "required"
+                }
+            ]
+        },
+        {
+            "form": [
+                {
+                    "name": "2332",
+                    "type": "text",
+                    "ogr": "optional"
+                },
+                {
+                    "name": "323223",
+                    "type": "text",
+                    "ogr": "optional"
+                }
+            ],
+            "name": "zer"
+        },
+        {
+            "form": [
+                {
+                    "name": "какие виды массажа вы предпочитаете?",
+                    "type": "text",
+                    "ogr": "optional"
+                },
+                {
+                    "name": "сколько нужно вам оргазмов",
+                    "type": "text",
+                    "ogr": "optional"
+                }
+            ],
+            "name": "бекзод"
+        }
+    ],
+    "interval": 48
 }
