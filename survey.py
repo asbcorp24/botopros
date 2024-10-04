@@ -70,6 +70,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Обработка нажатий кнопок в меню"""
     query = update.callback_query
     await query.answer()
+    await query.edit_message_reply_markup(reply_markup=None)
     if query.data.startswith('download_'):
         survey_name = query.data[len('download_'):]  # Извлекаем название анкеты
         #await handle_date_input(update, context)

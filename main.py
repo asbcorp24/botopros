@@ -46,12 +46,17 @@ def check_login(text: str) -> bool:
     # Здесь должна быть логика проверки логина
     return text == "admin"
 
+def load_config():
+    with open('config.json', 'r', encoding='utf-8') as f:
+        return json.load(f)
+
 
 def main():
     json_schema = load_json_schema()
-
+    config = load_config()
+    token = config.get("token")
     """Запуск бота."""
-    application = Application.builder().token('7034463952:AAF20wTujVISRpUO0m4rAvsDBbF2TVwQj9Q').build()
+    application = Application.builder().token(token).build()
 
     # Обработка команды /start
     application.add_handler(CommandHandler('start', start))
